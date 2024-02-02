@@ -450,6 +450,7 @@ void FileDialog::setLabelText(QFileDialog::DialogLabel label, const QString &tex
     switch (static_cast<int>(label)) {
     case QFileDialog::Accept:
         statusBar()->acceptButton()->setText(text);
+        d->customAcceptBtnText = text;
         break;
     case QFileDialog::Reject:
         statusBar()->rejectButton()->setText(text);
@@ -847,6 +848,30 @@ void FileDialog::updateAcceptButtonState()
     }
 }
 
+void FileDialog::updateAcceptButtonText()
+{
+    if (!d->isFileView)
+        return;
+
+    if (d->acceptMode != QFileDialog::AcceptSave)
+        return;
+
+    QList<QUrl> urls { CoreEventsCaller::sendGetSelectedFiles(internalWinId()) };
+    if (urls.size() < 1) {
+        statusBar()->acceptButton()->setText(d->customAcceptBtnText);
+        d->acceptCanOpenOnSave = false;
+        return;
+    }
+
+    const QUrl url = urls.first();
+    const QSharedPointer<FileInfo> info = InfoFactory::create<FileInfo>(url);
+    if (!info || !info->isAttributes(OptInfoType::kIsDir))
+        return;
+
+    statusBar()->acceptButton()->setText(tr("Open"));
+    d->acceptCanOpenOnSave = true;
+}
+
 void FileDialog::handleEnterPressed()
 {
     if (!statusBar()->acceptButton()->isEnabled() || !d->isFileView)
@@ -1046,6 +1071,7 @@ void FileDialog::initConnect()
             static_cast<void (QComboBox::*)(const QString &)>(&QComboBox::activated),
             this, &FileDialog::selectedNameFilterChanged);
     connect(this, &FileDialog::selectionFilesChanged, &FileDialog::updateAcceptButtonState);
+    connect(this, &FileDialog::selectionFilesChanged, &FileDialog::updateAcceptButtonText);
 }
 
 void FileDialog::initEventsConnect()
