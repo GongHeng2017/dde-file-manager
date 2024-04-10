@@ -362,12 +362,13 @@ QString ComputerInfoThread::cpuInfo() const
         }
 
         double cpuMaxMhz { 0.0 };
+        QString processor { "Unkonw" };
         QString validFrequency { "CurrentSpeed" };
-        QDBusMessage msgCpuHardware = interface.call("Get", SYSTEM_INFO_SERVICE, "CPUHardware");
-        QList<QVariant> argsCpuHardware = msgCpuHardware.arguments();
-        if (argsCpuHardware.count() > 0) {
-            QString cpuHardware = argsCpuHardware.at(0).value<QDBusVariant>().variant().toString();
-            if (cpuHardware.contains("PANGU"))
+        QDBusMessage msgCpuInfo = interface.call("Get", SYSTEM_INFO_SERVICE, "Processor");
+        QList<QVariant> argsCpuInfo = msgCpuInfo.arguments();
+        if (argsCpuInfo.count() > 0) {
+            processor = argsCpuInfo.at(0).value<QDBusVariant>().variant().toString();
+            if (processor.contains("PANGU"))
                 validFrequency = "CPUMaxMHz";
         }
 
@@ -378,11 +379,6 @@ QString ComputerInfoThread::cpuInfo() const
         }
 
         if (DSysInfo::cpuModelName().isEmpty()) {
-            QDBusMessage msgCpuInfo = interface.call("Get", SYSTEM_INFO_SERVICE, "Processor");
-            QList<QVariant> argsCpuInfo = msgCpuInfo.arguments();
-            QString processor { "Unkonw" };
-            if (argsCpuInfo.count() > 0)
-                processor = argsCpuInfo.at(0).value<QDBusVariant>().variant().toString();
             result = QString("%1 @ %2GHz").arg(processor).arg(cpuMaxMhz / 1000);
         } else {
             result = QString("%1 @ %2GHz").arg(DSysInfo::cpuModelName()).arg(cpuMaxMhz / 1000);
