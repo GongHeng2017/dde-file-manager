@@ -84,7 +84,84 @@ function(dfm_configure_base_library target_name)
             libappimage
             PkgConfig::MINIZIP
     )
-    
+
+    # Minimized window restore on Wayland: xdg-shell has no un-minimize request,
+    # and xdg-activation cannot help because it only trusts tokens minted by a
+    # window the user is interacting with - which a minimized one never is.
+    # zwlr_foreign_toplevel_manager_v1 is what window switchers use instead, and
+    # it is a wlroots protocol rather than a compositor specific one. Optional:
+    # without it the library still builds and activation falls back to a plain
+    # request.
+    find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS WaylandClient)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WLR_PROTOCOLS QUIET wlr-protocols)
+    # pkg_check_modules does not export pkgdatadir, so read it directly. It is
+    # the only reliable pointer to where the protocol definitions live.
+    pkg_get_variable(WLR_PROTOCOLS_PKGDATADIR wlr-protocols pkgdatadir)
+    set(DFM_FOREIGN_TOPLEVEL_XML
+        ${WLR_PROTOCOLS_PKGDATADIR}/unstable/wlr-foreign-toplevel-management-unstable-v1.xml)
+    if(TARGET Qt${QT_VERSION_MAJOR}::WaylandClient
+            AND WLR_PROTOCOLS_FOUND
+            AND EXISTS "${DFM_FOREIGN_TOPLEVEL_XML}")
+        qt6_generate_wayland_protocol_client_sources(${target_name}
+            FILES ${DFM_FOREIGN_TOPLEVEL_XML})
+        target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::WaylandClient)
+        target_compile_definitions(${target_name} PRIVATE DFM_WITH_FOREIGN_TOPLEVEL)
+    else()
+        message(STATUS "DFM: foreign-toplevel protocol unavailable, minimized window restore is disabled")
+    endif()
+
+    # Space-key preview window transition: the compositor plays the open/close
+    # animation around a rectangle attached to an xdg-activation token. That is
+    # a Treeland feature, so it depends on treeland-protocols, and the raw
+    # wl_surface access needs Qt's private Wayland headers
+    # (qt6-wayland-private-dev), exposed by the QtWaylandClientPrivate target.
+    # Independent of the foreign-toplevel block above: either can be absent.
+    find_package(TreelandProtocols QUIET)
+    pkg_get_variable(WAYLAND_PROTOCOLS_DATADIR wayland-protocols pkgdatadir)
+    set(DFM_WINDOW_TRANSITION_XML
+        ${TREELAND_PROTOCOLS_DATA_DIR}/treeland-window-transition-unstable-v1.xml)
+    set(DFM_XDG_ACTIVATION_XML
+        ${WAYLAND_PROTOCOLS_DATADIR}/staging/xdg-activation/xdg-activation-v1.xml)
+    # Both XML files are inputs to the generator, which aborts the whole build
+    # when one is missing, so each of them has to be probed. wayland-protocols
+    # is only reachable through pkg-config: no Qt package depends on the file
+    # the transition protocol needs.
+    if(TARGET Qt${QT_VERSION_MAJOR}::WaylandClientPrivate
+            AND EXISTS "${DFM_WINDOW_TRANSITION_XML}"
+            AND EXISTS "${DFM_XDG_ACTIVATION_XML}")
+        qt6_generate_wayland_protocol_client_sources(${target_name}
+            FILES
+                ${DFM_XDG_ACTIVATION_XML}
+                ${DFM_WINDOW_TRANSITION_XML})
+        target_link_libraries(${target_name} PRIVATE Qt${QT_VERSION_MAJOR}::WaylandClientPrivate)
+        target_compile_definitions(${target_name} PRIVATE DFM_WITH_TREELAND_TRANSITION)
+    else()
+        message(STATUS "DFM: window transition protocol unavailable, preview transition is disabled")
+    endif()
+
+    # File dialog dock-icon hiding: the dialog sets the dock-preview bit of
+    # treeland-dde-shell-unstable-v2's set_skip_flags on its surface, which
+    # removes the window from the foreign toplevel lists the dock taskbar
+    # consumes. treeland-dde-shell-v1 was deprecated upstream, unstable-v2 is
+    # its replacement. Another Treeland protocol from the package the
+    # transition block above probes, and the raw wl_surface access reuses the
+    # private Wayland headers that block links. Independent of both blocks
+    # above: each can be absent.
+    set(DFM_DDE_SHELL_XML
+        ${TREELAND_PROTOCOLS_DATA_DIR}/treeland-dde-shell-unstable-v2.xml)
+    if(TARGET Qt${QT_VERSION_MAJOR}::WaylandClientPrivate
+            AND EXISTS "${DFM_DDE_SHELL_XML}")
+        qt6_generate_wayland_protocol_client_sources(${target_name}
+            FILES ${DFM_DDE_SHELL_XML})
+        target_link_libraries(${target_name} PRIVATE
+            Qt${QT_VERSION_MAJOR}::WaylandClient
+            Qt${QT_VERSION_MAJOR}::WaylandClientPrivate)
+        target_compile_definitions(${target_name} PRIVATE DFM_WITH_DDE_SHELL)
+    else()
+        message(STATUS "DFM: dde-shell protocol unavailable, file dialog dock-icon hiding is disabled")
+    endif()
+
     # Include directories
     target_include_directories(${target_name} 
         PUBLIC

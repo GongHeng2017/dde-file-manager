@@ -58,6 +58,7 @@ Q_SIGNALS:
     void shareCountChanged(int count);
     void shareAdded(const QString &path);
     void shareRemoved(const QString &path);
+    void shareChanged(const QString &path);
     void shareRemoveFailed(const QString &path);
     void sambaPasswordSet(bool success);
 
@@ -89,6 +90,7 @@ private:
     void emitShareCountChanged(int count);
     void emitShareAdded(const QString &path);
     void emitShareRemoved(const QString &path);
+    void emitShareChanged(const QString &path);
     void emitShareRemoveFailed(const QString &path);
 
     // Lazy initialization for D-Bus interface to avoid unnecessary service activation

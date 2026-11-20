@@ -14,6 +14,7 @@
 #include <dfm-base/interfaces/abstractjobhandler.h>
 #include <dfm-base/utils/systempathutil.h>
 #include <dfm-base/utils/fileutils.h>
+#include <dfm-base/utils/windowutils.h>
 #include <dfm-base/widgets/filemanagerwindowsmanager.h>
 #include <dfm-base/base/application/application.h>
 
@@ -88,7 +89,7 @@ void CommandParser::processCommand()
     if (isSet("activation-token")) {
         const QString &token = value("activation-token");
         if (!token.isEmpty()) {
-            qputenv("XDG_ACTIVATION_TOKEN", token.toUtf8());
+            DFMBASE_USE_NAMESPACE WindowUtils::setActivationToken(token);
             qCInfo(logAppFileManager) << "Set XDG_ACTIVATION_TOKEN for Wayland activation:" << token;
         }
     }
@@ -300,19 +301,34 @@ void CommandParser::openInUrls()
     for (QString path : positionalArguments()) {
         if (!isSet("raw")) {
             // 路径字符串在DUrl::fromUserInput中会处理编码，这里不处理
-            if (!QDir().exists(path) && !path.startsWith("./") && !path.startsWith("../") && !path.startsWith("/")) {
+            // 以 '~' 开头的路径由 UrlRoute::fromUserInput 直接展开到家目录，
+            // 预先编码会让 '%xx' 作为字面量被拼进家目录路径
+            if (!QDir().exists(path) && !path.startsWith("./") && !path.startsWith("../")
+                && !path.startsWith("/") && !path.startsWith("~")) {
                 // 路径中包含特殊字符的全部uri编码
                 QRegularExpression regexp("[#&@\\!\\?]");
                 if (path.contains(regexp)) {
-                    QString left, right, encode;
-                    int idx = path.indexOf(regexp);
-                    while (idx != -1) {
-                        left = path.left(idx);
-                        right = path.mid(idx + 1);
-                        encode = QUrl::toPercentEncoding(path.mid(idx, 1));
-                        path = left + encode + right;
-                        idx = path.indexOf(regexp);
+                    // 对带 scheme 的 URL（如 sftp://user@host:port/path），只编码
+                    // authority 之后的部分，避免编码 authority 中的 @ 等字符而破坏 URL 结构
+                    int encodeStart = 0;
+                    int schemeIdx = path.indexOf("://");
+                    if (schemeIdx != -1) {
+                        encodeStart = path.indexOf('/', schemeIdx + 3);
+                        if (encodeStart == -1)
+                            encodeStart = path.length();
                     }
+
+                    QString toEncode = path.mid(encodeStart);
+                    QString left, right, encode;
+                    int idx = toEncode.indexOf(regexp);
+                    while (idx != -1) {
+                        left = toEncode.left(idx);
+                        right = toEncode.mid(idx + 1);
+                        encode = QUrl::toPercentEncoding(toEncode.mid(idx, 1));
+                        toEncode = left + encode + right;
+                        idx = toEncode.indexOf(regexp);
+                    }
+                    path = path.left(encodeStart) + toEncode;
                 }
             }
         }
@@ -373,9 +389,7 @@ void CommandParser::openWindowWithUrl(const QUrl &url)
     auto actWinId = FMWindowsIns.lastActivedWindowId();
     if (Application::appAttribute(Application::kOpenInNewTab).toBool() && actWinId > 0) {
         auto activeWindow = [](FileManagerWindow *w) {
-            if (w->isMinimized())
-                w->setWindowState(w->windowState() & ~Qt::WindowMinimized);
-            w->activateWindow();
+            DFMBASE_USE_NAMESPACE WindowUtils::activateWindow(w);
         };
 
         if (flag) {

@@ -7,9 +7,16 @@
 
 #include "dfmplugin_workspace_global.h"
 
+#include <dfm-base/utils/private/windowtransition_p.h>
+
 #include <QObject>
 #include <QKeySequence>
 #include <QKeyEvent>
+#include <QList>
+#include <QPixmap>
+#include <QRect>
+#include <QSize>
+#include <QUrl>
 
 namespace dfmplugin_workspace {
 
@@ -27,7 +34,7 @@ public:
     void renameProcessing();
 
 protected slots:
-    void acitonTriggered();
+    void actionTriggered();
     void copyFiles();
     void copyFilePath();
     void cutFiles();
@@ -48,6 +55,8 @@ private:
     bool normalKeyPressEventHandle(const QKeyEvent *event);
     bool doEnterPressed();
     void initRenameProcessTimer();
+    void launchPreview(const QList<QUrl> &selectUrls, const QList<QUrl> &currentDirUrls, const QUrl &anchorUrl);
+    bool previewAnchor(const QUrl &url, QRect *anchor, QPixmap *snapshot) const;
 
 private:
     FileView *view { nullptr };

@@ -10,6 +10,7 @@
 
 #include "config.h"   //cmake
 
+#include <dfm-base/utils/applaunchutils.h>
 #include <dfm-base/utils/hidefilehelper.h>
 #include <dfm-base/base/urlroute.h>
 #include <dfm-base/file/local/localfilehandler.h>
@@ -1034,33 +1035,32 @@ QUrl FileOperationsEventReceiver::determineLinkTarget(const QUrl &sourceUrl, con
 
 bool FileOperationsEventReceiver::doOpenInTerminal(const QUrl &url)
 {
+    // 复用 LocalFileHandler 的终端路径查找逻辑：default-terminal → x-terminal-emulator → xterm
+    const QString terminalPath = LocalFileHandler().defaultTerminalPath();
+    if (terminalPath.isEmpty())
+        return false;
+
+    // xterm 的 -w 参数用于设置边框宽度而非打开目录，xterm 需保持工作目录方式打开
     const static QString dde_daemon_default_term = QStringLiteral("/usr/lib/deepin-daemon/default-terminal");
     const static QString debian_x_term_emu = QStringLiteral("/usr/bin/x-terminal-emulator");
+    const bool isXterm = terminalPath != dde_daemon_default_term && terminalPath != debian_x_term_emu;
 
-    QString terminalPath;
-    if (QFileInfo::exists(dde_daemon_default_term)) {
-        terminalPath = dde_daemon_default_term;
-    } else if (QFileInfo::exists(debian_x_term_emu)) {
-        terminalPath = debian_x_term_emu;
+    // 优先通过 AM1 executeCommand 打开终端，纳入 AM1 实例管理（DSG_APP_ID 由 AM1 管理，独立于文管环境）；
+    // AM1 不可用或调用失败时回退 QProcess::startDetached，行为与原逻辑一致
+    const QString workdir = url.toLocalFile();
+
+    // systemd支持的单个文件名最长为255字节，导致长文件名在终端打开失败，使用命令参数的方式打开路径
+    // 路径以空格结尾时，default-terminal 的工作目录方式无法正确处理，使用命令参数的方式打开路径
+    if (!isXterm && (url.fileName().toLocal8Bit().size() > NAME_MAX || url.toLocalFile().endsWith(' '))) {
+        if (AppLaunchUtils::instance().executeCommand(terminalPath, { "-w", url.toLocalFile() }, QStringLiteral("shortcut"), {}))
+            return true;
+        return QProcess::startDetached(terminalPath, { "-w", url.toLocalFile() });
     }
 
-    if (!terminalPath.isEmpty()) {
-        // systemd支持的单个文件名最长为255字节，导致长文件名在终端打开失败，使用命令参数的方式打开路径
-        // 路径以空格结尾时，default-terminal 的工作目录方式无法正确处理，使用命令参数的方式打开路径
-        if (url.fileName().toLocal8Bit().size() > NAME_MAX || url.toLocalFile().endsWith(' ')) {
-            return QProcess::startDetached(terminalPath, { "-w", url.toLocalFile() });
-        } else {
-            // 使用命令参数的方式会造成终端DSG_APP_ID与应用一致，导致终端修改主题时影响文管/桌面
-            return QProcess::startDetached(terminalPath, {}, url.toLocalFile());
-        }
-    }
-
-    terminalPath = QStandardPaths::findExecutable("xterm");
-    if (QFileInfo::exists(terminalPath)) {
-        // 为安全考虑，使用命令参数的方式打开路径
-        return QProcess::startDetached(terminalPath, {}, url.toLocalFile());
-    }
-    return false;
+    // 使用命令参数的方式会造成终端DSG_APP_ID与应用一致，导致终端修改主题时影响文管/桌面，故默认用工作目录方式
+    if (AppLaunchUtils::instance().executeCommand(terminalPath, {}, QStringLiteral("shortcut"), workdir))
+        return true;
+    return QProcess::startDetached(terminalPath, {}, workdir);
 }
 
 FileOperationsEventReceiver *FileOperationsEventReceiver::instance()
@@ -1574,7 +1574,7 @@ bool FileOperationsEventReceiver::handleOperationLinkFile(const quint64 windowId
 
     // Handle force deletion of existing target
     if (force) {
-        FileInfoPointer toInfo = InfoFactory::create<FileInfo>(targetUrl);
+        FileInfoPointer toInfo = InfoFactory::create<FileInfo>(targetUrl, Global::CreateFileInfoType::kCreateFileInfoSync);
         if (toInfo && toInfo->exists()) {
             DFMBASE_NAMESPACE::LocalFileHandler fileHandlerDelete;
             fileHandlerDelete.deleteFile(targetUrl);
@@ -1964,7 +1964,9 @@ void FileOperationsEventReceiver::handleOperationUndoCut(const quint64 windowId,
 
 void FileOperationsEventReceiver::handleOperationFilesPreview(const quint64 windowId,
                                                               const QList<QUrl> &selectUrls,
-                                                              const QList<QUrl> &dirUrls)
+                                                              const QList<QUrl> &dirUrls,
+                                                              const QString &transitionToken,
+                                                              const QString &transitionChannel)
 {
     if (selectUrls.isEmpty() || dirUrls.isEmpty())
         return;
@@ -1983,6 +1985,15 @@ void FileOperationsEventReceiver::handleOperationFilesPreview(const quint64 wind
     // Write data to temporary file in JSON format
     QJsonObject data;
     data["windowId"] = QString::number(windowId);
+
+    // The activation token drives the Treeland window transition of the
+    // preview window (open from / close back to the selected item). Empty when
+    // the transition is not available.
+    data["activationToken"] = transitionToken;
+
+    // The transition channel lets the preview process report the currently
+    // shown file, so the close animation follows file switches.
+    data["transitionChannel"] = transitionChannel;
 
     QJsonArray selectUrlsArray;
     for (const auto &url : selectUrls) {

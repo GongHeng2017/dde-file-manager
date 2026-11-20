@@ -450,9 +450,9 @@ TEST_F(FileOperatorHelperTest, PreviewFiles_ValidViewAndUrls_PreviewsFiles)
     
     // Mock previewFiles to avoid actual implementation
     bool previewFilesCalled = false;
-    using PreviewFilesFunc = void (FileOperatorHelper::*)(const FileView *, const QList<QUrl> &, const QList<QUrl> &);
+    using PreviewFilesFunc = void (FileOperatorHelper::*)(const FileView *, const QList<QUrl> &, const QList<QUrl> &, const QString &, const QString &);
     stub.set_lamda(static_cast<PreviewFilesFunc>(&FileOperatorHelper::previewFiles),
-                   [&previewFilesCalled](FileOperatorHelper *, const FileView *, const QList<QUrl> &, const QList<QUrl> &) {
+                   [&previewFilesCalled](FileOperatorHelper *, const FileView *, const QList<QUrl> &, const QList<QUrl> &, const QString &, const QString &) {
         __DBG_STUB_INVOKE__
         previewFilesCalled = true;
     });
@@ -520,7 +520,7 @@ TEST_F(FileOperatorHelperTest, RedoFiles_ValidView_RedoesFiles)
 //        发布 GlobalEventType::kRevocation 撤销事件。
 TEST_F(FileOperatorHelperTest, BUG130603_UndoFiles_PublishesRevocationWithWindowId)
 {
-    stub.set_lamda(&dfmbase::NetworkUtils::checkFtpOrSmbBusy,
+    stub.set_lamda(static_cast<bool (dfmbase::NetworkUtils::*)(const QUrl &)>(&dfmbase::NetworkUtils::checkFtpOrSmbBusy),
                    [](dfmbase::NetworkUtils *, const QUrl &) { return false; });
     stub.set_lamda(ADDR(dfmbase::Application, appAttribute),
                    [](dfmbase::Application::ApplicationAttribute) { return QVariant(1); });

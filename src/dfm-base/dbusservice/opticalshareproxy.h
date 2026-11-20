@@ -11,6 +11,9 @@
 #include <QScopedPointer>
 #include <QVariantMap>
 #include <QDBusInterface>
+#include <QDBusPendingCall>
+
+class QDBusServiceWatcher;
 
 namespace dfmbase {
 
@@ -27,6 +30,9 @@ public:
     bool setBurnState(const QString &dev, const QVariantMap &state);
     bool clearBurnState(const QString &dev);
 
+    QDBusPendingCall burnStatesAsync();
+    QDBusPendingCall clearBurnStateAsync(const QString &dev);
+
     QVariantMap burnAttribute(const QString &tag);
     bool setBurnAttribute(const QString &tag, const QVariantMap &attribute);
     bool clearBurnAttribute(const QString &tag);
@@ -38,14 +44,22 @@ Q_SIGNALS:
 private Q_SLOTS:
     void onBurnStateChanged(const QString &dev, const QVariantMap &state);
     void onBurnAttributeChanged(const QString &tag, const QVariantMap &attribute);
+    void onServiceRegisteredAsync(const QString &serviceName);
 
 private:
     explicit OpticalShareProxy(QObject *parent = nullptr);
 
     QDBusInterface *dbusInterface();
 
+    // 服务未注册时跳过同步调用并返回 false；同时确保服务上线监听已建立
+    bool guardServiceReady(const char *method);
+    // 服务上线后的异步全量刷新，逐设备补发 burnStateChanged
+    void refreshBurnStatesAsync();
+
 private:
     QScopedPointer<QDBusInterface> interface;
+    QDBusServiceWatcher *serviceWatcher { nullptr };
+    bool asyncRefreshRunning { false };
 };
 
 }   // namespace dfmbase
